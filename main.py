@@ -69,15 +69,51 @@ class CountingBot(commands.Bot):
 
 bot = CountingBot()
 
-@bot.tree.command(name="countchannel", description="Add or remove counting channel (mods only).")
-@app_commands.describe(action="add or remove", channel="Channel to add or remove.")
-async def countchannel(interaction: discord.Interaction, action: Literal["add", "remove"], channel: discord.TextChannel):
+@bot.tree.command(name="countchannel", description="Add, remove, or list counting channels (mods only).")
+@app_commands.describe(
+    action="add, remove, or list",
+    channel="Channel to add or remove (not needed for list)."
+)
+async def countchannel(
+    interaction: discord.Interaction,
+    action: Literal["add", "remove", "list"],
+    channel: discord.TextChannel = None
+):
     perms = interaction.user.guild_permissions
     if not (perms.manage_messages or perms.administrator):
-        await interaction.response.send_message("You need Manage Messages or Administrator permission.", ephemeral=True)
+        await interaction.response.send_message(
+            "You need Manage Messages or Administrator permission.",
+            ephemeral=True
+        )
         return
 
     config = get_config()
+
+    if action == "list":
+        channel_ids = config.get("channels", [])
+        if not channel_ids:
+            await interaction.response.send_message("No counting channels are set.", ephemeral=True)
+            return
+        names = []
+        for cid in channel_ids:
+            ch = interaction.guild.get_channel(int(cid))
+            if ch:
+                names.append(ch.name)
+            else:
+                names.append(f"(unknown:{cid})")
+        await interaction.response.send_message(
+            "Current counting channels:\n" + "\n".join(f"- {name}" for name in names),
+            ephemeral=True
+        )
+        return
+
+    if channel is None:
+        await interaction.response.send_message(
+            "Please specify a channel for add/remove actions.",
+            ephemeral=True
+        )
+        return
+
     cid = str(channel.id)
 
     if action == "add":
@@ -87,7 +123,7 @@ async def countchannel(interaction: discord.Interaction, action: Literal["add", 
         config["channels"].append(cid)
         save_config(config)
         await interaction.response.send_message(f"Added {channel.mention} to counting channels.")
-    else:
+    elif action == "remove":
         if cid not in config.get("channels", []):
             await interaction.response.send_message(f"{channel.mention} is not in the list.", ephemeral=True)
             return
