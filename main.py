@@ -4,53 +4,51 @@ import subprocess
 import sys
 from typing import Literal
 
-def install_requirements():
-    if os.path.exists("requirements.txt"):
-        print("Installing requirements")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
-    else:
+def ensure_requirements():
+    if not os.path.exists("requirements.txt"):
         with open("requirements.txt", "w", encoding="utf-8") as f:
             f.write("discord.py\n")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+    print("Installing requirements...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
 
-install_requirements()
+ensure_requirements()
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-CONFIG_PATH = "config.json"
-STATE_PATH = "counts_state.json"
+CONFIG_FILE = "config.json"
+STATE_FILE = "counts_state.json"
 
-def load_config():
-    if not os.path.exists(CONFIG_PATH):
-        cfg = {"token": "YOUR_BOT_TOKEN_HERE", "channels": []}
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2)
-        return cfg
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+def get_config():
+    if not os.path.exists(CONFIG_FILE):
+        default = {"token": "YOUR_BOT_TOKEN_HERE", "channels": []}
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(default, f, indent=2)
+        return default
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def save_config(cfg):
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
 
-def load_state():
-    if not os.path.exists(STATE_PATH):
+def get_state():
+    if not os.path.exists(STATE_FILE):
         return {}
-    with open(STATE_PATH, "r", encoding="utf-8") as f:
+    with open(STATE_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def save_state(state):
-    tmp = STATE_PATH + ".tmp"
+    tmp = STATE_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
-    os.replace(tmp, STATE_PATH)
+    os.replace(tmp, STATE_FILE)
 
-def is_valid_binary(s: str):
-    return s and all(ch in "01" for ch in s) and len(s) <= 16
+def looks_like_binary(s):
+    return s and all(c in "01" for c in s) and len(s) <= 16
 
-def bin_to_int(s: str):
+def binary_to_int(s):
     return int(s, 2)
 
 intents = discord.Intents.default()
@@ -58,8 +56,8 @@ intents.message_content = True
 intents.guilds = True
 intents.messages = True
 
-config = load_config()
-state = load_state()
+config = get_config()
+state = get_state()
 
 class CountingBot(commands.Bot):
     def __init__(self):
@@ -79,26 +77,26 @@ async def countchannel(interaction: discord.Interaction, action: Literal["add", 
         await interaction.response.send_message("You need Manage Messages or Administrator permission.", ephemeral=True)
         return
 
-    config = load_config()
-    channel_id = str(channel.id)
+    config = get_config()
+    cid = str(channel.id)
 
     if action == "add":
-        if channel_id in config.get("channels", []):
+        if cid in config.get("channels", []):
             await interaction.response.send_message(f"{channel.mention} is already in the list.", ephemeral=True)
             return
-        config["channels"].append(channel_id)
+        config["channels"].append(cid)
         save_config(config)
         await interaction.response.send_message(f"Added {channel.mention} to counting channels.")
     else:
-        if channel_id not in config.get("channels", []):
+        if cid not in config.get("channels", []):
             await interaction.response.send_message(f"{channel.mention} is not in the list.", ephemeral=True)
             return
-        config["channels"].remove(channel_id)
+        config["channels"].remove(cid)
         save_config(config)
 
-        state = load_state()
-        if channel_id in state:
-            del state[channel_id]
+        state = get_state()
+        if cid in state:
+            del state[cid]
             save_state(state)
 
         await interaction.response.send_message(f"Removed {channel.mention} from counting channels.")
@@ -109,53 +107,55 @@ async def on_ready():
     print("Bot is ready!")
 
 @bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot or not message.guild:
+async def on_message(msg: discord.Message):
+    if msg.author.bot or not msg.guild:
         return
 
-    config = load_config()
-    channel_id = str(message.channel.id)
-    if channel_id not in config.get("channels", []):
+    config = get_config()
+    cid = str(msg.channel.id)
+    if cid not in config.get("channels", []):
         return
 
-    content = message.content.strip()
-    if not is_valid_binary(content):
-        state = load_state()
-        ch_state = state.get(channel_id, {"active": False})
-        if ch_state.get("active"):
-            state[channel_id] = {"active": False, "next": 1}
+    text = msg.content.strip()
+    if not looks_like_binary(text):
+        state = get_state()
+        ch = state.get(cid, {"active": False})
+        if ch.get("active"):
+            state[cid] = {"active": False, "next": 1}
             save_state(state)
-            await message.channel.send("Counting failed!")
+            await msg.channel.send("Counting failed!")
         return
 
-    val = bin_to_int(content)
-    state = load_state()
-    ch_state = state.get(channel_id)
+    value = binary_to_int(text)
+    state = get_state()
+    ch = state.get(cid)
 
-    if not ch_state or not ch_state.get("active"):
-        if val == 1:
-            state[channel_id] = {"active": True, "next": 2}
+    if not ch or not ch.get("active"):
+        if value == 1:
+            state[cid] = {"active": True, "next": 2}
             save_state(state)
-            await message.channel.send("Counting started!")
+            await msg.channel.send("Counting started!")
+            await msg.add_reaction("✅")
         return
 
-    expected = ch_state["next"]
-    if val == expected:
-        next_expected = expected + 1
-        if next_expected > 2**16 - 1:
-            state[channel_id] = {"active": False, "next": 1}
+    expected = ch["next"]
+    if value == expected:
+        next_val = expected + 1
+        if next_val > 2**16 - 1:
+            state[cid] = {"active": False, "next": 1}
             save_state(state)
-            await message.channel.send("Counting complete (max 16-bit reached). Resetting!")
+            await msg.channel.send("Counting complete (max 16-bit reached). Resetting!")
         else:
-            state[channel_id]["next"] = next_expected
+            state[cid]["next"] = next_val
             save_state(state)
+        await msg.add_reaction("✅")
     else:
-        state[channel_id] = {"active": False, "next": 1}
+        state[cid] = {"active": False, "next": 1}
         save_state(state)
-        await message.channel.send("Counting failed!")
+        await msg.channel.send("Counting failed!")
 
 if __name__ == "__main__":
-    cfg = load_config()
+    cfg = get_config()
     token = cfg.get("token")
     if not token or token == "YOUR_BOT_TOKEN_HERE":
         print("❌ Please add your bot token in config.json first.")

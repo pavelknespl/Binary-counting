@@ -1,4 +1,4 @@
 {
   "token": "YOUR_BOT_TOKEN_HERE",
-  "channels": [LEAVE_EMPTY]
+  "channels": []
 }
