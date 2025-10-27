@@ -51,6 +51,33 @@ def looks_like_binary(s):
 def binary_to_int(s):
     return int(s, 2)
 
+def looks_like_hex(s):
+    if not s:
+        return False
+    if s.startswith(("0x", "0X")):
+        body = s[2:]
+        return body and all(c in "0123456789abcdefABCDEF" for c in body) and len(body) <= 4
+    return False
+
+def hex_to_int(s):
+    return int(s, 16)
+
+def find_number_token(text: str):
+    if not text:
+        return None, None
+    tokens = text.split()
+    last_tok = None
+    last_base = None
+    for tok in tokens:
+        clean = tok.strip('`\n\r ,<>')
+        if looks_like_binary(clean):
+            last_tok = clean
+            last_base = 2
+        elif looks_like_hex(clean):
+            last_tok = clean
+            last_base = 16
+    return last_tok, last_base
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -153,7 +180,8 @@ async def on_message(msg: discord.Message):
         return
 
     text = msg.content.strip()
-    if not looks_like_binary(text):
+    tok, base = find_number_token(text)
+    if not tok:
         state = get_state()
         ch = state.get(cid, {"active": False})
         if ch.get("active"):
@@ -162,7 +190,19 @@ async def on_message(msg: discord.Message):
             await msg.channel.send("Counting failed!")
         return
 
-    value = binary_to_int(text)
+    try:
+        if base == 2:
+            value = binary_to_int(tok)
+        else:
+            value = hex_to_int(tok)
+    except Exception:
+        state = get_state()
+        ch = state.get(cid, {"active": False})
+        if ch.get("active"):
+            state[cid] = {"active": False, "next": 1}
+            save_state(state)
+            await msg.channel.send("Counting failed!")
+        return
     state = get_state()
     ch = state.get(cid)
 
